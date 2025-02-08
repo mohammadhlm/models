@@ -1,12 +1,5 @@
 #!/bin/bash
 
-# Function to set up the model at the very beginning
-setup_model() {
-    echo -n "Enter the model to use (e.g., hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf): "
-    read MODEL
-    export MODEL
-}
-
 # Function to display the header
 show_header() {
     clear
@@ -46,6 +39,65 @@ show_resource_usage() {
     read
 }
 
+# Function to fetch and display available models, allow user to select one, and set it as default
+manage_models() {
+    echo "Fetching available models..."
+    AVAILABLE_MODELS=$(aios-cli models available 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        echo "Error fetching available models. Please check your installation."
+        return 1
+    fi
+
+    # Process available models
+    MODELS=($(echo "$AVAILABLE_MODELS" | grep -v "^Found" | awk '{$1=$1};1'))
+    if [ ${#MODELS[@]} -eq 0 ]; then
+        echo "No available models found."
+        return 1
+    fi
+
+    echo "Available models:"
+    for i in "${!MODELS[@]}"; do
+        echo "$((i + 1)). ${MODELS[$i]}"
+    done
+
+    echo -n "Enter the number of the model to download and set as default (or 0 to cancel): "
+    read CHOICE
+    if [ "$CHOICE" -eq 0 ]; then
+        echo "Operation canceled."
+        return 1
+    elif [ "$CHOICE" -gt 0 ] && [ "$CHOICE" -le ${#MODELS[@]} ]; then
+        SELECTED_MODEL=${MODELS[$((CHOICE - 1))]}
+        echo "Selected model: $SELECTED_MODEL"
+    else
+        echo "Invalid choice."
+        return 1
+    fi
+
+    # Remove all other models
+    echo "Removing other models..."
+    for MODEL in "${MODELS[@]}"; do
+        if [ "$MODEL" != "$SELECTED_MODEL" ]; then
+            echo "Removing model: $MODEL"
+            aios-cli models remove "$MODEL" 2>/dev/null
+        fi
+    done
+
+    # Download and install the selected model
+    echo "Downloading and installing model: $SELECTED_MODEL"
+    aios-cli models add "$SELECTED_MODEL"
+    if [ $? -eq 0 ]; then
+        echo "Model $SELECTED_MODEL added successfully."
+    else
+        echo "Error adding model $SELECTED_MODEL."
+        return 1
+    fi
+
+    # Set the selected model as default
+    export MODEL="$SELECTED_MODEL"
+    echo "Model $SELECTED_MODEL has been set as the default model."
+    return 0
+}
+
 # Main menu
 show_menu() {
     show_header
@@ -56,9 +108,10 @@ show_menu() {
     echo "4. Delete Node"
     echo "5. Show Instructions"
     echo "6. Check Resource Consumption"
-    echo "7. Exit"
+    echo "7. Manage Models" # New option added
+    echo "8. Exit"
     echo
-    echo -n "Your choice (1-7): "
+    echo -n "Your choice (1-8): "
 }
 
 # Node management menu
@@ -386,8 +439,14 @@ check_connection() {
     fi
 }
 
-# At the very beginning, ask for the model input
-setup_model
+# Read the model from the file /root/models/chosen_model.txt
+if [ -f /root/models/chosen_model.txt ]; then
+    MODEL=$(cat /root/models/chosen_model.txt)
+    export MODEL
+else
+    echo "Error: File /root/models/chosen_model.txt not found."
+    exit 1
+fi
 
 # Main logic
 while true; do
@@ -726,9 +785,18 @@ while true; do
             show_resource_usage
             ;;
         7)
+            show_header
+            manage_models
+            echo "Press Enter to return to the main menu..."
+            read
+            ;;
+        8)
             echo "Thank you for using the installer!"
             echo "Don't forget to subscribe to @nodetrip on Telegram"
             exit 0
+            ;;
+        *)
+            echo "Invalid choice. Please try again."
             ;;
     esac
 done
